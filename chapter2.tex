@@ -1,0 +1,189 @@
+\section*{Глава 2. Проектирование веб-приложения}
+
+\addcontentsline{toc}{section}{Глава 2. Проектирование веб-приложения}
+\stepcounter{section}
+
+
+\subsection{Анализ целевой аудитории}
+
+Основными пользователями разрабатываемого веб-приложения являются люди, стремящиеся контролировать свое питание и вести здоровый образ жизни. Выделяются две ключевые роли:
+
+\begin{itemize}
+	\item \textbf{Обычный пользователь} --- человек, ведущий дневник питания, добавляющий продукты в свой рацион и отслеживающий КБЖУ. Основные задачи: удобное добавление приемов пищи, просмотр статистики за день/неделю, контроль выполнения суточной нормы калорий.
+	\item \textbf{Администратор системы} --- пользователь с расширенными правами, ответственный за поддержание справочника продуктов в актуальном состоянии. Основные задачи: добавление новых продуктов, редактирование существующих, удаление устаревших позиций через встроенную административную панель Django.
+\end{itemize}
+
+Для каждой роли проведено профилирование по методу персонажей (Personas) для
+минимизации когнитивной нагрузки на интерфейс.
+
+\subsection{Описание функциональности приложения}
+
+Функциональные возможности системы определяются через взаимодействие пользователя с системой. Основной бизнес-кейс представлен в виде User Story: «Я, как пользователь, хочу добавить съеденный продукт с указанием его веса, чтобы система автоматически рассчитала количество калорий и БЖУ для данного приема пищи».
+
+На рисунке~\ref{fig:use_case} представлена диаграмма вариантов использования
+(Use Case).
+
+\begin{figure}[ht!]
+	\centering
+	\includegraphics[width=0.8\textwidth]{use_case_diagram}
+	\caption{Диаграмма вариантов использования системы}
+	\label{fig:use_case}
+\end{figure}
+
+\subsection{Проектирование модели данных}
+
+При выборе архитектуры базы данных был проведен сравнительный анализ различных СУБД. В результате принято решение использовать PostgreSQL как промышленный стандарт, обеспечивающий надежность хранения данных, поддержку транзакций и возможность выполнения сложных агрегирующих запросов для расчета суточной калорийности и статистики питания.
+
+Структура базы данных разрабатываемого приложения включает следующие основные таблицы: \texttt{users} (пользователи), \texttt{products} (справочник продуктов), \texttt{meal\_entries} (записи о приемах пищи). 
+
+Структура таблицы \texttt{products} представлена в табл.~\ref{tab:db_products}.
+
+\begin{longtable}{|l|l|p{3.5cm}|p{5.5cm}|}
+	\caption{Структура таблицы продуктов (\texttt{products})} \label{tab:db_products} \\
+
+	\hline
+	\textbf{Поле} & \textbf{Тип} & \textbf{Ограничение} & \textbf{Описание} \\ \hline
+	\endfirsthead
+	
+	\tabcont{\ref{tab:db_products}}
+	\textbf{Поле} & \textbf{Тип} & \textbf{Ограничение} & \textbf{Описание} \\ \hline
+	\endhead
+	
+	\hline
+	\endfoot
+	
+	\hline
+	\endlastfoot
+
+	id & SERIAL & PRIMARY KEY & Уникальный идентификатор продукта \\ \hline
+	name & VARCHAR(100) & NOT NULL & Название продукта \\ \hline
+	calories & NUMERIC(6,2) & NOT NULL & Калорийность на 100 г, ккал \\ \hline
+	protein & NUMERIC(5,2) & NOT NULL & Белки на 100 г, г \\ \hline
+	fat & NUMERIC(5,2) & NOT NULL & Жиры на 100 г, г \\ \hline
+	carbohydrates & NUMERIC(5,2) & NOT NULL & Углеводы на 100 г, г \\ \hline
+	created\_at & TIMESTAMP & DEFAULT NOW() & Дата добавления продукта \\ \hline
+	updated\_at & TIMESTAMP & DEFAULT NOW() & Дата последнего изменения \\ \hline
+\end{longtable}
+
+Структура таблицы \texttt{meal\_entries} (записи о приемах пищи) представлена в табл.~\ref{tab:db_meal_entries}.
+
+\begin{longtable}{|l|l|p{3.5cm}|p{5.5cm}|}
+	\caption{Структура таблицы приемов пищи (\texttt{meal\_entries})} \label{tab:db_meal_entries} \\
+
+	\hline
+	\textbf{Поле} & \textbf{Тип} & \textbf{Ограничение} & \textbf{Описание} \\ \hline
+	\endfirsthead
+	
+	\tabcont{\ref{tab:db_meal_entries}}
+	\textbf{Поле} & \textbf{Тип} & \textbf{Ограничение} & \textbf{Описание} \\ \hline
+	\endhead
+	
+	\hline
+	\endfoot
+	
+	\hline
+	\endlastfoot
+
+	id & SERIAL & PRIMARY KEY & Уникальный идентификатор записи \\ \hline
+	user\_id & INT & FOREIGN KEY (users.id) & Ссылка на пользователя \\ \hline
+	product\_id & INT & FOREIGN KEY (products.id) & Ссылка на продукт \\ \hline
+	weight & NUMERIC(6,1) & NOT NULL & Вес порции, грамм \\ \hline
+	meal\_type & VARCHAR(20) & NOT NULL & Тип приема пищи (завтрак/обед/ужин/перекус) \\ \hline
+	consumed\_at & TIMESTAMP & NOT NULL & Дата и время приема пищи \\ \hline
+	created\_at & TIMESTAMP & DEFAULT NOW() & Время создания записи в системе \\ \hline
+\end{longtable}
+
+
+Калорийность порции рассчитывается следующим образом:
+
+\begin{equation}
+	K_{порция} = \frac{K_{100г} \cdot W_{г}}{100}
+	\label{eq:calories_formula}
+\end{equation}
+
+\begin{where}
+	\item $K_{порция}$ — калорийность порции, ккал;
+	\item $K_{100г}$ — калорийность продукта на 100 г, ккал;
+	\item $W_{г}$ — вес порции, грамм.
+\end{where}
+
+Аналогично рассчитываются белки, жиры и углеводы для порции:
+
+\begin{equation}
+	P_{порция} = \frac{P_{100г} \cdot W_{г}}{100}
+	\label{eq:protein_formula}
+\end{equation}
+
+\begin{where}
+	\item $P_{порция}$ — содержание белков в порции, г;
+	\item $P_{100г}$ — содержание белков в продукте на 100 г, г;
+	\item $W_{г}$ — вес порции, грамм.
+\end{where}
+
+Суточная норма калорий рассчитывается по формуле Миффлина-Сан-Жеора:
+Для женщин:
+\begin{equation}
+	BMR = 10 \cdot W + 6.25 \cdot H - 5 \cdot A - 161
+	\label{eq:bmr_women}
+\end{equation}
+
+Для мужчин:
+\begin{equation}
+	BMR = 10 \cdot W + 6.25 \cdot H - 5 \cdot A + 5
+	\label{eq:bmr_men}
+\end{equation}
+
+\begin{where}
+	\item $BMR$ — базальный уровень метаболизма (основной обмен), ккал/сут;
+	\item $W$ — вес пользователя, кг;
+	\item $H$ — рост пользователя, см;
+	\item $A$ — возраст пользователя, лет.
+\end{where}
+
+Итоговая суточная норма калорий с учетом физической активности:
+\begin{equation}
+	Daily\_calories = BMR \cdot Activity\_factor
+	\label{eq:daily_calories}
+\end{equation}
+
+\begin{where}
+	\item $Activity\_factor$ — коэффициент активности (от 1.2 до 2.0 в зависимости от уровня физической нагрузки).
+\end{where}
+
+
+\subsection{Разработка макетов страниц}
+
+\begin{figure}[ht!]
+	\centering
+	\includegraphics[width=0.8\textwidth]{wireframe_login}
+	\caption{Макет страницы входа}
+	\label{fig:wireframe_login}
+\end{figure}
+
+\begin{figure}[ht!]
+	\centering
+	\includegraphics[width=0.8\textwidth]{wireframe_register}
+	\caption{Макет страницы регистрации}
+	\label{fig:wireframe_register}
+\end{figure}
+
+\begin{figure}[ht!]
+	\centering
+	\includegraphics[width=0.8\textwidth]{wireframe_diary}
+	\caption{Макет главной страницы (календарь+дневник)}
+	\label{fig:wireframe_diary}
+\end{figure}
+
+\begin{figure}[ht!]
+	\centering
+	\includegraphics[width=0.8\textwidth]{wireframe_add_meal}
+	\caption{Макет добавления блюда}
+	\label{fig:wireframe_add_meal}
+\end{figure}
+
+\begin{figure}[ht!]
+	\centering
+	\includegraphics[width=0.8\textwidth]{wireframe_user_page}
+	\caption{Макет страницы пользователя}
+	\label{fig:wireframe_user_page}
+\end{figure}
